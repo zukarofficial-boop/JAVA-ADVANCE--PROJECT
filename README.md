@@ -269,8 +269,8 @@ Follow this exact order to test the complete lifecycle in Postman:
 - **Body** (raw JSON):
 ```json
 {
-  "name": "Hariharan",
-  "email": "hari@example.com",
+  "name": "Ravi M",
+  "email": "ravi123@gmail.com",
   "password": "password123",
   "role": "USER"
 }
@@ -279,8 +279,8 @@ Follow this exact order to test the complete lifecycle in Postman:
 ```json
 {
   "id": 1,
-  "name": "Hariharan",
-  "email": "hari@example.com",
+  "name": "Ravi M",
+  "email": "ravi123@gmail.com",
   "role": "USER",
   "createdAt": "2026-09-13T15:00:00"
 }
