@@ -29,8 +29,9 @@
 @REM -----------------------------------------------------------------------------
 
 @REM Begin all REM lines with '@' in case MAVEN_BATCH_ECHO is 'on'
-@echo off
-@REM enable echoing my setting MAVEN_BATCH_ECHO to 'on'
+@if "%JAVA_HOME%"=="" set "JAVA_HOME=C:\Program Files\Java\jdk-26.0.2.1"
+@if "%JAVA_HOME:~-4%"=="\bin" set "JAVA_HOME=%JAVA_HOME:~0,-4%"
+@if "%JAVA_HOME:~-5%"=="\bin\" set "JAVA_HOME=%JAVA_HOME:~0,-5%"
 @if "%MAVEN_BATCH_ECHO%"=="on" echo %MAVEN_BATCH_ECHO%
 
 @REM Execute a user defined script before this one
@@ -45,6 +46,9 @@ if exist "%USERPROFILE%\mavenrc_pre.cmd" call "%USERPROFILE%\mavenrc_pre.cmd" %*
 set ERROR_CODE=0
 
 @REM ==== START VALIDATION ====
+if "%JAVA_HOME%"=="" if exist "C:\Program Files\Java\jdk-26.0.2.1" set "JAVA_HOME=C:\Program Files\Java\jdk-26.0.2.1"
+if "%JAVA_HOME:~-4%"=="\bin" set "JAVA_HOME=%JAVA_HOME:~0,-4%"
+if "%JAVA_HOME:~-5%"=="\bin\" set "JAVA_HOME=%JAVA_HOME:~0,-5%"
 if not "%JAVA_HOME%"=="" goto OkJHome
 for %%i in (java.exe) do set "JAVACMD=%%~$PATH:i"
 goto checkJCmd
@@ -60,12 +64,7 @@ echo this environment variable is needed to run this program. >&2
 goto error
 
 :chkMHome
-set "MAVEN_HOME=%~dp0"
-set "MAVEN_HOME=%MAVEN_HOME:~0,-5%"
-if not "%MAVEN_HOME%"=="" goto checkMCmd
-goto error
-
-:checkMCmd
+if "%MAVEN_HOME%"=="" set "MAVEN_HOME=C:\Users\HARIHARAN\.m2\wrapper\dists\apache-maven-3.9.8-bin\4fnp1ql35bgk2a0p7m31ovbgb0\apache-maven-3.9.8"
 if exist "%MAVEN_HOME%\bin\mvn.cmd" goto init
 goto error
 @REM ==== END VALIDATION ====

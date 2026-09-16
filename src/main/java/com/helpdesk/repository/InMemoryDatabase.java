@@ -1,80 +1,66 @@
 package com.helpdesk.repository;
-
 import com.helpdesk.enums.TicketPriority;
 import com.helpdesk.enums.TicketStatus;
 import com.helpdesk.model.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
-
 /**
  * In-Memory Data Store utilizing Java Collections:
  * - HashMap for O(1) key-value lookups by ID.
  * - HashSet for uniqueness checking of email addresses.
  * - ArrayLists inside entities for ordered audit logs and comment threads.
  */
+
 public class InMemoryDatabase {
     private static InMemoryDatabase instance;
-
     private final Map<Integer, User> userMap;
     private final Map<Integer, Agent> agentMap;
     private final Map<Integer, Ticket> ticketMap;
     private final Set<String> emailSet;
-
     private final AtomicInteger userIdCounter;
     private final AtomicInteger ticketIdCounter;
     private final AtomicInteger commentIdCounter;
-
     private InMemoryDatabase() {
         this.userMap = new HashMap<>();
         this.agentMap = new HashMap<>();
         this.ticketMap = new HashMap<>();
         this.emailSet = new HashSet<>();
-
         this.userIdCounter = new AtomicInteger(1);
         this.ticketIdCounter = new AtomicInteger(1);
         this.commentIdCounter = new AtomicInteger(1);
-
         preloadSampleData();
     }
-
     public static synchronized InMemoryDatabase getInstance() {
         if (instance == null) {
             instance = new InMemoryDatabase();
         }
         return instance;
     }
-
     public int nextUserId() {
         return userIdCounter.getAndIncrement();
     }
-
     public int nextTicketId() {
         return ticketIdCounter.getAndIncrement();
     }
-
     public int nextCommentId() {
         return commentIdCounter.getAndIncrement();
     }
-
     public Map<Integer, User> getUsers() {
         return userMap;
     }
-
     public Map<Integer, Agent> getAgents() {
         return agentMap;
     }
-
     public Map<Integer, Ticket> getTickets() {
         return ticketMap;
     }
-
     public Set<String> getEmailSet() {
         return emailSet;
     }
-
     /**
      * Seeds initial realistic demo data so the user can immediately test searching, filtering, and assignment.
      */
+
     private void preloadSampleData() {
         // Preload Customers
         Customer c1 = new Customer(nextUserId(), "Alice Johnson", "alice@company.com", "Engineering", "+1-555-0101");
@@ -83,7 +69,6 @@ public class InMemoryDatabase {
         userMap.put(c2.getId(), c2);
         emailSet.add(c1.getEmail().toLowerCase());
         emailSet.add(c2.getEmail().toLowerCase());
-
         // Preload Agents
         Agent a1 = new Agent(nextUserId(), "Sarah Connor", "sarah@helpdesk.com", "Network & VPN Systems");
         Agent a2 = new Agent(nextUserId(), "David Miller", "david@helpdesk.com", "Database & Infrastructure");
@@ -93,7 +78,6 @@ public class InMemoryDatabase {
         agentMap.put(a2.getId(), a2);
         emailSet.add(a1.getEmail().toLowerCase());
         emailSet.add(a2.getEmail().toLowerCase());
-
         // Preload Sample Tickets
         // Ticket 1: In Progress
         Ticket t1 = new Ticket(nextTicketId(), "Cannot connect to Cisco AnyConnect VPN",
@@ -108,14 +92,12 @@ public class InMemoryDatabase {
         a1.assignTicket(t1);
         c1.addCreatedTicket(t1);
         ticketMap.put(t1.getId(), t1);
-
         // Ticket 2: Open
         Ticket t2 = new Ticket(nextTicketId(), "September billing invoice tax discrepancy",
                 "Invoice #INV-2026-904 shows 28% tax instead of 18% enterprise tier rate.",
                 TicketPriority.HIGH, c2);
         c2.addCreatedTicket(t2);
         ticketMap.put(t2.getId(), t2);
-
         // Ticket 3: Resolved
         Ticket t3 = new Ticket(nextTicketId(), "Password reset verification email not arriving",
                 "Requested password reset link 3 times but no email received in inbox or spam.",
@@ -131,7 +113,6 @@ public class InMemoryDatabase {
         a2.assignTicket(t3);
         c1.addCreatedTicket(t3);
         ticketMap.put(t3.getId(), t3);
-
         // Ticket 4: Closed
         Ticket t4 = new Ticket(nextTicketId(), "Request for second monitor on Desk 4B",
                 "Need an additional HDMI monitor for multi-screen data analytics.",
