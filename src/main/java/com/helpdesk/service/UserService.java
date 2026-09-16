@@ -1,14 +1,13 @@
 package com.helpdesk.service;
+import java.util.Collection;
+import java.util.List;
+import java.util.stream.Collectors;
 
 import com.helpdesk.exception.DuplicateUserException;
 import com.helpdesk.exception.UserNotFoundException;
 import com.helpdesk.model.Customer;
 import com.helpdesk.model.User;
 import com.helpdesk.repository.InMemoryDatabase;
-import java.util.Collection;
-import java.util.List;
-import java.util.stream.Collectors;
-
 /**
  * Service managing User operations (Customers).
  */
