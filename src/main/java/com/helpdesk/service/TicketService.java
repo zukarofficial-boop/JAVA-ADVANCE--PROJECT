@@ -1,232 +1,266 @@
 package com.helpdesk.service;
 
-import com.helpdesk.dto.TicketRequestDTO;
-import com.helpdesk.dto.TicketResponseDTO;
-import com.helpdesk.dto.TicketStatusUpdateDTO;
-import com.helpdesk.entity.Ticket;
-import com.helpdesk.entity.User;
-import com.helpdesk.enums.Priority;
-import com.helpdesk.enums.Role;
+import com.helpdesk.enums.TicketPriority;
 import com.helpdesk.enums.TicketStatus;
-import com.helpdesk.exception.InvalidOperationException;
-import com.helpdesk.exception.ResourceNotFoundException;
-import com.helpdesk.repository.TicketRepository;
-import com.helpdesk.repository.UserRepository;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.util.ArrayList;
-import java.util.List;
+import com.helpdesk.exception.AgentNotFoundException;
+import com.helpdesk.exception.InvalidStatusTransitionException;
+import com.helpdesk.exception.InvalidTicketException;
+import com.helpdesk.exception.TicketNotFoundException;
+import com.helpdesk.model.*;
+import com.helpdesk.repository.InMemoryDatabase;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
- * Service class handling all business logic related to Tickets.
+ * Service managing Ticket lifecycle, status workflow validation, and Streams-based queries.
  */
-@Service
-@Transactional
 public class TicketService {
+    private final InMemoryDatabase db;
+    private final UserService userService;
+    private final AgentService agentService;
 
-    private final TicketRepository ticketRepository;
-    private final UserRepository userRepository;
-
-    // Constructor-based Dependency Injection
-    public TicketService(TicketRepository ticketRepository, UserRepository userRepository) {
-        this.ticketRepository = ticketRepository;
-        this.userRepository = userRepository;
+    public TicketService(UserService userService, AgentService agentService) {
+        this.db = InMemoryDatabase.getInstance();
+        this.userService = userService;
+        this.agentService = agentService;
     }
 
     /**
-     * Creates a new ticket.
-     * Default status is set to OPEN, and assignedTo is initially null.
+     * Creates a new support ticket.
+     * Status is initialized to OPEN.
      */
-    public TicketResponseDTO createTicket(TicketRequestDTO dto) {
-        User creator = userRepository.findById(dto.getCreatedByUserId())
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + dto.getCreatedByUserId()));
-
-        Ticket ticket = new Ticket(
-                dto.getTitle(),
-                dto.getDescription(),
-                dto.getPriority(),
-                creator
-        );
-        ticket.setStatus(TicketStatus.OPEN);
-        ticket.setAssignedTo(null);
-
-        Ticket savedTicket = ticketRepository.save(ticket);
-        return mapToTicketResponseDTO(savedTicket);
-    }
-
-    /**
-     * Retrieves all tickets.
-     */
-    public List<TicketResponseDTO> getAllTickets() {
-        List<Ticket> tickets = ticketRepository.findAll();
-        List<TicketResponseDTO> responseList = new ArrayList<>();
-        for (Ticket ticket : tickets) {
-            responseList.add(mapToTicketResponseDTO(ticket));
+    public Ticket createTicket(String title, String description, TicketPriority priority, int customerId) {
+        if (title == null || title.trim().isEmpty()) {
+            throw new InvalidTicketException("Ticket title cannot be blank!");
         }
-        return responseList;
+        if (description == null || description.trim().isEmpty()) {
+            throw new InvalidTicketException("Ticket description cannot be blank!");
+        }
+
+        Customer customer = userService.getCustomerById(customerId);
+        int id = db.nextTicketId();
+        Ticket ticket = new Ticket(id, title.trim(), description.trim(), priority, customer);
+        
+        customer.addCreatedTicket(ticket);
+        db.getTickets().put(id, ticket);
+        return ticket;
     }
 
-    /**
-     * Retrieves a single ticket by its ID.
-     */
-    public TicketResponseDTO getTicketById(Long id) {
-        Ticket ticket = ticketRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Ticket not found with id: " + id));
-        return mapToTicketResponseDTO(ticket);
+    public Ticket getTicketById(int id) {
+        Ticket ticket = db.getTickets().get(id);
+        if (ticket == null) {
+            throw new TicketNotFoundException("Ticket not found with ID: " + id);
+        }
+        return ticket;
     }
 
-    /**
-     * Updates an existing ticket's title, description, and priority.
-     * Preserves creation timestamp, creator, and assigned agent.
-     */
-    public TicketResponseDTO updateTicket(Long id, TicketRequestDTO dto) {
-        Ticket ticket = ticketRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Ticket not found with id: " + id));
-
-        ticket.setTitle(dto.getTitle());
-        ticket.setDescription(dto.getDescription());
-        ticket.setPriority(dto.getPriority());
-
-        Ticket updatedTicket = ticketRepository.save(ticket);
-        return mapToTicketResponseDTO(updatedTicket);
-    }
-
-    /**
-     * Deletes a ticket by ID.
-     */
-    public void deleteTicket(Long id) {
-        Ticket ticket = ticketRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Ticket not found with id: " + id));
-        ticketRepository.delete(ticket);
+    public Collection<Ticket> getAllTickets() {
+        return db.getTickets().values();
     }
 
     /**
      * Assigns a ticket to a support agent.
-     * Validates that the assigned user exists and has the role AGENT.
+     * Automatically transitions status from OPEN to ASSIGNED.
      */
-    public TicketResponseDTO assignTicket(Long ticketId, Long agentId) {
-        Ticket ticket = ticketRepository.findById(ticketId)
-                .orElseThrow(() -> new ResourceNotFoundException("Ticket not found with id: " + ticketId));
+    public Ticket assignTicket(int ticketId, int agentId, User assignedBy) {
+        Ticket ticket = getTicketById(ticketId);
+        Agent agent = agentService.getAgentById(agentId);
 
-        User agent = userRepository.findById(agentId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + agentId));
-
-        if (agent.getRole() != Role.AGENT) {
-            throw new InvalidOperationException(
-                    "Cannot assign ticket. User with id " + agentId + " is not an AGENT (Current role: " + agent.getRole() + ")"
-            );
+        if (!agent.isAvailable()) {
+            throw new AgentNotFoundException("Agent " + agent.getName() + " is currently marked as unavailable/offline.");
         }
 
-        ticket.setAssignedTo(agent);
-        Ticket savedTicket = ticketRepository.save(ticket);
-        return mapToTicketResponseDTO(savedTicket);
+        Agent previousAgent = ticket.getAssignedAgent();
+        if (previousAgent != null) {
+            previousAgent.removeAssignedTicket(ticket);
+        }
+
+        ticket.setAssignedAgent(agent);
+        agent.assignTicket(ticket);
+
+        TicketStatus oldStatus = ticket.getStatus();
+        if (oldStatus == TicketStatus.OPEN) {
+            ticket.setStatus(TicketStatus.ASSIGNED);
+            ticket.addHistory(new TicketHistory(oldStatus, TicketStatus.ASSIGNED, assignedBy,
+                    "Assigned to agent: " + agent.getName()));
+        } else {
+            ticket.addHistory(new TicketHistory(oldStatus, oldStatus, assignedBy,
+                    "Reassigned to agent: " + agent.getName()));
+        }
+
+        return ticket;
     }
 
     /**
-     * Updates the status of a ticket with sensible business validation.
+     * Enforces the status workflow:
+     * OPEN -> ASSIGNED -> IN_PROGRESS -> RESOLVED -> CLOSED
      */
-    public TicketResponseDTO updateTicketStatus(Long ticketId, TicketStatusUpdateDTO dto) {
-        Ticket ticket = ticketRepository.findById(ticketId)
-                .orElseThrow(() -> new ResourceNotFoundException("Ticket not found with id: " + ticketId));
-
+    public Ticket updateTicketStatus(int ticketId, TicketStatus newStatus, User changedBy, String remark) {
+        Ticket ticket = getTicketById(ticketId);
         TicketStatus currentStatus = ticket.getStatus();
-        TicketStatus newStatus = dto.getStatus();
 
-        // Business Rule: A CLOSED ticket cannot be transitioned directly back to OPEN
-        if (currentStatus == TicketStatus.CLOSED && newStatus == TicketStatus.OPEN) {
-            throw new InvalidOperationException("A CLOSED ticket cannot be directly transitioned back to OPEN.");
+        if (currentStatus == newStatus) {
+            return ticket; // No change
         }
+
+        validateStatusTransition(ticket, currentStatus, newStatus);
 
         ticket.setStatus(newStatus);
-        Ticket savedTicket = ticketRepository.save(ticket);
-        return mapToTicketResponseDTO(savedTicket);
+        ticket.addHistory(new TicketHistory(currentStatus, newStatus, changedBy, remark));
+        return ticket;
     }
 
     /**
-     * Filters tickets by status.
+     * Validates permissible status transitions.
      */
-    public List<TicketResponseDTO> getTicketsByStatus(TicketStatus status) {
-        List<Ticket> tickets = ticketRepository.findByStatus(status);
-        List<TicketResponseDTO> responseList = new ArrayList<>();
-        for (Ticket ticket : tickets) {
-            responseList.add(mapToTicketResponseDTO(ticket));
+    private void validateStatusTransition(Ticket ticket, TicketStatus current, TicketStatus next) {
+        boolean valid = switch (current) {
+            case OPEN -> (next == TicketStatus.ASSIGNED || next == TicketStatus.IN_PROGRESS);
+            case ASSIGNED -> (next == TicketStatus.IN_PROGRESS || next == TicketStatus.RESOLVED);
+            case IN_PROGRESS -> (next == TicketStatus.RESOLVED);
+            case RESOLVED -> (next == TicketStatus.CLOSED || next == TicketStatus.IN_PROGRESS);
+            case CLOSED -> false; // Closed tickets cannot be altered
+        };
+
+        if (!valid) {
+            throw new InvalidStatusTransitionException(String.format(
+                    "Invalid status transition: Cannot change ticket #%d from %s to %s. Expected sequential lifecycle: OPEN -> ASSIGNED -> IN_PROGRESS -> RESOLVED -> CLOSED",
+                    ticket.getId(), current, next));
         }
-        return responseList;
+
+        if (next == TicketStatus.RESOLVED && ticket.getResolution() == null) {
+            throw new InvalidStatusTransitionException(
+                    "Cannot mark ticket as RESOLVED without providing resolution details! Please use the 'Resolve Ticket' option.");
+        }
     }
 
     /**
-     * Filters tickets by priority.
+     * Resolves a ticket by recording resolution details and setting status to RESOLVED.
      */
-    public List<TicketResponseDTO> getTicketsByPriority(Priority priority) {
-        List<Ticket> tickets = ticketRepository.findByPriority(priority);
-        List<TicketResponseDTO> responseList = new ArrayList<>();
-        for (Ticket ticket : tickets) {
-            responseList.add(mapToTicketResponseDTO(ticket));
+    public Ticket resolveTicket(int ticketId, String resolutionNotes, Agent agent) {
+        Ticket ticket = getTicketById(ticketId);
+
+        if (ticket.getStatus() == TicketStatus.CLOSED) {
+            throw new InvalidStatusTransitionException("Cannot resolve a ticket that is already CLOSED.");
         }
-        return responseList;
+
+        Resolution resolution = new Resolution(resolutionNotes, agent);
+        ticket.setResolution(resolution);
+
+        TicketStatus oldStatus = ticket.getStatus();
+        ticket.setStatus(TicketStatus.RESOLVED);
+        ticket.addHistory(new TicketHistory(oldStatus, TicketStatus.RESOLVED, agent,
+                "Resolved: " + resolutionNotes));
+
+        return ticket;
     }
 
     /**
-     * Filters tickets created by a specific user.
+     * Closes a resolved ticket.
      */
-    public List<TicketResponseDTO> getTicketsByUser(Long userId) {
-        if (!userRepository.existsById(userId)) {
-            throw new ResourceNotFoundException("User not found with id: " + userId);
+    public Ticket closeTicket(int ticketId, User user, String closureNote) {
+        Ticket ticket = getTicketById(ticketId);
+
+        if (ticket.getStatus() != TicketStatus.RESOLVED) {
+            throw new InvalidStatusTransitionException(
+                    "Only tickets in RESOLVED status can be CLOSED. Current status is " + ticket.getStatus());
         }
-        List<Ticket> tickets = ticketRepository.findByCreatedById(userId);
-        List<TicketResponseDTO> responseList = new ArrayList<>();
-        for (Ticket ticket : tickets) {
-            responseList.add(mapToTicketResponseDTO(ticket));
-        }
-        return responseList;
+
+        TicketStatus oldStatus = ticket.getStatus();
+        ticket.setStatus(TicketStatus.CLOSED);
+        ticket.addHistory(new TicketHistory(oldStatus, TicketStatus.CLOSED, user,
+                closureNote != null ? closureNote : "Confirmed resolution and closed"));
+
+        return ticket;
     }
 
     /**
-     * Filters tickets assigned to a specific agent.
+     * Adds a discussion comment to a ticket.
      */
-    public List<TicketResponseDTO> getTicketsByAgent(Long agentId) {
-        if (!userRepository.existsById(agentId)) {
-            throw new ResourceNotFoundException("Agent not found with id: " + agentId);
+    public Comment addComment(int ticketId, String message, User author) {
+        if (message == null || message.trim().isEmpty()) {
+            throw new InvalidTicketException("Comment message cannot be empty!");
         }
-        List<Ticket> tickets = ticketRepository.findByAssignedToId(agentId);
-        List<TicketResponseDTO> responseList = new ArrayList<>();
-        for (Ticket ticket : tickets) {
-            responseList.add(mapToTicketResponseDTO(ticket));
-        }
-        return responseList;
+
+        Ticket ticket = getTicketById(ticketId);
+        int commentId = db.nextCommentId();
+        Comment comment = new Comment(commentId, message.trim(), author);
+        ticket.addComment(comment);
+        return comment;
+    }
+
+    // ==========================================
+    // Java Streams API Operations
+    // ==========================================
+
+    /**
+     * Search tickets by keyword in title or description.
+     */
+    public List<Ticket> searchByKeyword(String keyword) {
+        String query = keyword.toLowerCase();
+        return db.getTickets().values().stream()
+                .filter(t -> t.getTitle().toLowerCase().contains(query) ||
+                             t.getDescription().toLowerCase().contains(query))
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     /**
-     * Helper method to fetch the Ticket entity internally for comments.
+     * Filter tickets by TicketStatus.
      */
-    public Ticket findTicketEntityById(Long id) {
-        return ticketRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Ticket not found with id: " + id));
+    public List<Ticket> filterByStatus(TicketStatus status) {
+        return db.getTickets().values().stream()
+                .filter(t -> t.getStatus() == status)
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     /**
-     * Helper method to convert a Ticket entity to a TicketResponseDTO.
+     * Filter tickets by TicketPriority.
      */
-    private TicketResponseDTO mapToTicketResponseDTO(Ticket ticket) {
-        Long createdById = ticket.getCreatedBy() != null ? ticket.getCreatedBy().getId() : null;
-        String createdByName = ticket.getCreatedBy() != null ? ticket.getCreatedBy().getName() : null;
+    public List<Ticket> filterByPriority(TicketPriority priority) {
+        return db.getTickets().values().stream()
+                .filter(t -> t.getPriority() == priority)
+                .sorted()
+                .collect(Collectors.toList());
+    }
 
-        Long assignedToId = ticket.getAssignedTo() != null ? ticket.getAssignedTo().getId() : null;
-        String assignedToName = ticket.getAssignedTo() != null ? ticket.getAssignedTo().getName() : null;
+    /**
+     * Filter tickets assigned to a specific agent.
+     */
+    public List<Ticket> filterByAgent(int agentId) {
+        return db.getTickets().values().stream()
+                .filter(t -> t.getAssignedAgent() != null && t.getAssignedAgent().getId() == agentId)
+                .sorted()
+                .collect(Collectors.toList());
+    }
 
-        return new TicketResponseDTO(
-                ticket.getId(),
-                ticket.getTitle(),
-                ticket.getDescription(),
-                ticket.getStatus(),
-                ticket.getPriority(),
-                ticket.getCreatedAt(),
-                ticket.getUpdatedAt(),
-                createdById,
-                createdByName,
-                assignedToId,
-                assignedToName
-        );
+    /**
+     * Filter tickets created by a specific customer.
+     */
+    public List<Ticket> filterByCustomer(int customerId) {
+        return db.getTickets().values().stream()
+                .filter(t -> t.getCreatedBy().getId() == customerId)
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Group tickets by status and count occurrences.
+     */
+    public Map<TicketStatus, Long> getTicketCountByStatus() {
+        return db.getTickets().values().stream()
+                .collect(Collectors.groupingBy(Ticket::getStatus, Collectors.counting()));
+    }
+
+    /**
+     * Counts active unresolved tickets (OPEN, ASSIGNED, IN_PROGRESS).
+     */
+    public long countActiveTickets() {
+        return db.getTickets().values().stream()
+                .filter(t -> t.getStatus() == TicketStatus.OPEN ||
+                             t.getStatus() == TicketStatus.ASSIGNED ||
+                             t.getStatus() == TicketStatus.IN_PROGRESS)
+                .count();
     }
 }
